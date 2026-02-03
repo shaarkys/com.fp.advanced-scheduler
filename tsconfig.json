@@ -4,7 +4,8 @@
     "module": "commonjs",
     "sourceMap": true,
     "esModuleInterop": true,
-    "baseUrl": "."
+    "baseUrl": ".",
+    "outDir": "./.homeybuild"
   },
   "include": [
     "./app.ts",

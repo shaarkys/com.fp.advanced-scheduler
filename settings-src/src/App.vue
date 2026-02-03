@@ -56,9 +56,9 @@
 </template>
 
 <script>
-import { ASSettings } from '../../src/CommonContainerClasses';
-import { SettingsPersistance } from '../../src/SettingsPersistance';
-import { SunWrapper } from '../../src/SunWrapper';
+import { ASSettings } from '../../.homeybuild/src/CommonContainerClasses';
+import { SettingsPersistance } from '../../.homeybuild/src/SettingsPersistance';
+import { SunWrapper } from '../../.homeybuild/src/SunWrapper';
 
 import AsvSchedule from '@/components/Schedule';
 import AsvSunEventTimes from '@/components/SunEventTimes';

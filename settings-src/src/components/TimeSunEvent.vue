@@ -53,8 +53,8 @@
 
 //The whole component expects a TimeInfo object in the v-model
 
-import { TimeInfo } from '../../../src/CommonContainerClasses';
-import { SunWrapper } from '../../../src/SunWrapper';
+import { TimeInfo } from '../../../.homeybuild/src/CommonContainerClasses';
+import { SunWrapper } from '../../../.homeybuild/src/SunWrapper';
  
 
 export default {

@@ -29,7 +29,7 @@
 </template>
 
 <script>
-import { TokenSetter, ScheduleItem } from '../../../src/CommonContainerClasses'
+import { TokenSetter, ScheduleItem } from '../../../.homeybuild/src/CommonContainerClasses'
 
 export default {
   name: 'AsvTokenSetter',

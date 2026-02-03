@@ -59,7 +59,7 @@
 <script>
 import AsvToken from '@/components/Token';
 import AsvScheduleItem from '@/components/ScheduleItem';
-import { Schedule, DaysType, TimeType } from '../../../src/CommonContainerClasses'
+import { Schedule, DaysType, TimeType } from '../../../.homeybuild/src/CommonContainerClasses'
 
 export default {
   name: 'AsvSchedule',

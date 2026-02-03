@@ -33,7 +33,7 @@
 </template>
 
 <script>
-import { Token } from '../../../src/CommonContainerClasses'
+import { Token } from '../../../.homeybuild/src/CommonContainerClasses'
 
 export default {
   name: 'AsvToken',

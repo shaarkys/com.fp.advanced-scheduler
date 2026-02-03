@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "core-js": "^3.6.5",
+    "event-pubsub": "4.2.4",
     "v-currency-field": "^3.1.1",
     "vue": "^2.6.12",
     "vue-i18n": "^8.23.0",
