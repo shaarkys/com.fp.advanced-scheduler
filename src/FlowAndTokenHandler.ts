@@ -146,6 +146,15 @@ export class FlowAndTokenHandler {
                         
                         myTokenPromise.then(myToken => {
                             this.tokenWrappers.push(new TokenWrapper(myToken,token));
+                            let defaultValue:any = null;
+                            if (token.type == 'boolean') defaultValue = false;
+                            else if (token.type == 'string') defaultValue = '';
+                            else if (token.type == 'number') defaultValue = 0;
+                            if (defaultValue !== null) {
+                                myToken.setValue(defaultValue).catch(err => {
+                                    this.homeyApp.log('Unable to set default token value for: ' + token.name + '. Error: ' + err);
+                                });
+                            }
                         
                             //Not needed in SDK3
                             //Promise = myToken.register()
@@ -174,7 +183,11 @@ export class FlowAndTokenHandler {
         
     }
 
-    setTokenValue(token:Token, value:any) {
+    async setTokenValue(token:Token, value:any): Promise<void> {
+        if (this.tokenWrappers == null || this.tokenWrappers.length === 0) {
+            this.homeyApp.log('No tokens registered when attempting to set value. Token: ' + token.name);
+            return;
+        }
         let ftw:TokenWrapper;
 
         //this.homeyApp.log('Looking for token: ' + token.name + ', with id: ' + token.id);
@@ -185,10 +198,29 @@ export class FlowAndTokenHandler {
         if (ftw != null) {
             let t = ftw.token;
             let ft = ftw.flowToken;
-            if (t.type == 'boolean') ft.setValue(Boolean(value));
-            else if (t.type == 'string') ft.setValue(String(value));
-            else if (t.type == 'number') ft.setValue(Number(value));
-            this.homeyApp.log('Token: ' + t.name + ', value set to: ' + value);
+            try {
+                if (t.type == 'boolean') {
+                    await ft.setValue(Boolean(value));
+                }
+                else if (t.type == 'string') {
+                    await ft.setValue(value == null ? '' : String(value));
+                }
+                else if (t.type == 'number') {
+                    let rawValue:any = value;
+                    if (typeof rawValue === 'string') {
+                        rawValue = rawValue.replace(',', '.');
+                    }
+                    let num = (typeof rawValue === 'number') ? rawValue : Number(rawValue);
+                    if (Number.isNaN(num)) {
+                        this.homeyApp.log('Invalid number for token: ' + t.name + '. Defaulting to 0. Value: ' + value);
+                        num = 0;
+                    }
+                    await ft.setValue(num);
+                }
+                this.homeyApp.log('Token: ' + t.name + ', value set to: ' + value);
+            } catch (error) {
+                this.homeyApp.log('Unable to set token value for: ' + t.name + '. Error: ' + error);
+            }
         }
         else{
             this.homeyApp.log('No tokens found when attempting to set value. Nothing done. Token: ' + token.name);

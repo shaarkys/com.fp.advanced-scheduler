@@ -297,20 +297,24 @@ export class TriggerHandler {
         if (arg === 'execute') {
             //this.homeyApp.log('Execute!');
             if (earliesttrigger != null) {
-                // Set tokens!
-                earliesttrigger.scheduleItem.tokenSetters.forEach(ts => {
-                    //Set token in flowtoken
-                    this.flowandtokenhandler.setTokenValue(ts.token,ts.value);
-                })
+                // Set tokens and then trigger flow.
+                let tokenSetPromises = earliesttrigger.scheduleItem.tokenSetters.map(ts => {
+                    return this.flowandtokenhandler.setTokenValue(ts.token, ts.value);
+                });
 
-                this.flowandtokenhandler.triggerFlow(earliesttrigger.scheduleItem.tokenSetters.map(ts=>ts.token), earliesttrigger);
+                Promise.all(tokenSetPromises).then(() => {
+                    this.flowandtokenhandler.triggerFlow(earliesttrigger.scheduleItem.tokenSetters.map(ts=>ts.token), earliesttrigger);
 
-                this.removeTrigger(earliesttrigger);
-                //this.homeyApp.log('Removed trigger from list: ' + earliesttrigger);
-                
-                this.runningtimer = setTimeout(function() { this.timerCallback('next'); }.bind(this), 100);
-                
-                //this.homeyApp.log('Execution done');
+                    this.removeTrigger(earliesttrigger);
+                    //this.homeyApp.log('Removed trigger from list: ' + earliesttrigger);
+                    
+                    this.runningtimer = setTimeout(function() { this.timerCallback('next'); }.bind(this), 100);
+                    
+                    //this.homeyApp.log('Execution done');
+                }).catch(error => {
+                    this.homeyApp.log('Error while setting token values before trigger: ' + error);
+                    this.runningtimer = setTimeout(function() { this.timerCallback('next'); }.bind(this), 100);
+                });
                 
             }     
         } 
