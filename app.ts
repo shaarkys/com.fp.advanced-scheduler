@@ -18,7 +18,7 @@ class AdvSchedulerApp extends HomeyApp {
     }
 
     let ma = new MainApp(this);
-    ma.init();
+    await ma.init();
     this.log('Advanced Scheduler has been initialized');
   }
 }

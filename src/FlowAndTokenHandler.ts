@@ -113,7 +113,7 @@ export class FlowAndTokenHandler {
         this.homeyApp.log('Setting up Flows done');
     }
 
-    setupTokens() {
+    setupTokens(): Promise<void> {
         this.homeyApp.log('Setting up Tokens');
 
         try {
@@ -121,21 +121,22 @@ export class FlowAndTokenHandler {
             if (this.tokenWrappers==null) {
                 this.tokenWrappers = new Array();    
             }
-            let mf = this.homey.flow;
             let ps:Promise<any>[] = new Array();
             this.tokenWrappers.forEach(tw => {
                 this.homeyApp.log('Unregistering token with id: ' + tw.token.id + ", name: " + tw.token.name);
                 
-                //let pr = new Promise
-                let promise = tw.flowToken.unregister();
+                let promise = tw.flowToken.unregister().catch(err => {
+                    this.homeyApp.log('Unable to unregister token with id: ' + tw.token.id + ", name: " + tw.token.name + ". Error: " + err);
+                });
                 ps.push(promise);
                 //mf.unregisterToken(tw.flowtoken);  
                 this.homeyApp.log('Unregistered token with id: ' + tw.token.id + ", name: " + tw.token.name);
             })
-            Promise.all(ps).then(() => {
+            return Promise.all(ps).then(() => {
                 this.homeyApp.log('All tokens unregged')
 
                 this.tokenWrappers = new Array();
+                let createPromises:Promise<any>[] = new Array();
                 this.schedules.forEach(schedule => {
                     schedule.tokens.forEach(token => {
     
@@ -144,24 +145,26 @@ export class FlowAndTokenHandler {
                         title: schedule.name + ' - ' + token.name
                         })
                         
-                        myTokenPromise.then(myToken => {
+                        let createPromise = myTokenPromise.then(myToken => {
                             this.tokenWrappers.push(new TokenWrapper(myToken,token));
                             let defaultValue:any = null;
                             if (token.type == 'boolean') defaultValue = false;
                             else if (token.type == 'string') defaultValue = '';
                             else if (token.type == 'number') defaultValue = 0;
                             if (defaultValue !== null) {
-                                myToken.setValue(defaultValue).catch(err => {
+                                return myToken.setValue(defaultValue).catch(err => {
                                     this.homeyApp.log('Unable to set default token value for: ' + token.name + '. Error: ' + err);
                                 });
                             }
-                        
+                            return Promise.resolve();
+                        }).then(() => {
                             //Not needed in SDK3
                             //Promise = myToken.register()
                             //   .catch(e => {console.log('Error registering token: ' + token.id + ', ' + token.name )});
                             this.homeyApp.log('Created token with id: ' + token.id + ", name: " + token.name);
                         }).catch(
-                            err => this.homeyApp.log('Unable to create token with id: ' + token.id + ", name: " + token.name + ". Error: " + err))
+                            err => this.homeyApp.log('Unable to create token with id: ' + token.id + ", name: " + token.name + ". Error: " + err));
+                        createPromises.push(createPromise);
                         
                 //     promise.then(()=>{
                 //             if (token.type == 'boolean') this.setTokenValue(token,false);
@@ -173,11 +176,14 @@ export class FlowAndTokenHandler {
                         
                 });
 
-                this.homeyApp.log('Setting up Tokens done');
+                return Promise.all(createPromises).then(() => {
+                    this.homeyApp.log('Setting up Tokens done');
+                });
             })
     
         } catch (error) {
             this.homeyApp.log('Not able to setup Tokens! Error: ' + error);
+            return Promise.resolve();
         }
 
         

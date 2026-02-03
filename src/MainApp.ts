@@ -26,7 +26,7 @@ export class MainApp {
         this.homey = this.homeyApp.homey;
     }
 
-    init() {
+    async init() {
 
         this.homeyApp.log('Advanced Scheduler MainApp is initializing...');
 
@@ -43,7 +43,7 @@ export class MainApp {
 
         this.flowAndTokenHandler = new FlowAndTokenHandler(this.homeyApp, this.asSettings.schedules);
         this.flowAndTokenHandler.setupFlows();
-        this.flowAndTokenHandler.setupTokens();
+        await this.flowAndTokenHandler.setupTokens();
 
         this.triggerHandler = new TriggerHandler(this.homeyApp, this.asSettings, this.flowAndTokenHandler, this.sunWrapper);
         this.triggerHandler.setupTriggers('startup');
@@ -58,7 +58,7 @@ export class MainApp {
     }
 
 
-    reinit() {
+    async reinit() {
 
         this.homeyApp.log('Advanced Scheduler MainApp is reinitializing...');
 
@@ -70,7 +70,7 @@ export class MainApp {
         this.asSettings = sp.getSettings();
         
         this.flowAndTokenHandler.setSchedules(this.asSettings.schedules);
-        this.flowAndTokenHandler.setupTokens();
+        await this.flowAndTokenHandler.setupTokens();
 
         this.triggerHandler = new TriggerHandler(this.homeyApp, this.asSettings, this.flowAndTokenHandler, this.sunWrapper);
         this.triggerHandler.setupTriggers('startup');
@@ -82,10 +82,10 @@ export class MainApp {
     private watchsettings(){
         this.homeyApp.log('Soon watching settings.');
 
-        this.homey.settings.on('set', (variable) => {
+        this.homey.settings.on('set', async (variable) => {
             if ( variable === 'settings' ) {
                 this.homeyApp.log('SettingsWatcher notised settings change. Reinitializing!');
-                this.reinit();
+                await this.reinit();
             }
         });
 

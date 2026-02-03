@@ -289,6 +289,10 @@ export class SettingsPersistance {
                     
                     si.tokensetters.forEach(ti => {
                         let localtoken = localschedule.tokens.find(t=>t.id==ti.id)
+                        if (!localtoken) {
+                            console.log('Token setter refers to missing token id: ' + ti.id + ' in schedule: ' + localschedule.name);
+                            return;
+                        }
                         let localTokenSetter:TokenSetter;
                         if (localtoken.type == 'boolean') { localTokenSetter = new TokenSetter(localsi, localtoken,Boolean(ti.value)); }
                         else if (localtoken.type == 'string') { localTokenSetter = new TokenSetter(localsi, localtoken,ti.value); }
@@ -297,7 +301,7 @@ export class SettingsPersistance {
                         //    if (this.homeyApp != null) this.homeyApp.log('Incorrect type for tokenSetter');
                             }
 
-                        localsi.tokenSetters.push(localTokenSetter);
+                        if (localTokenSetter) localsi.tokenSetters.push(localTokenSetter);
                     });
 
                     localschedule.scheduleItems.push(localsi);            
@@ -364,6 +368,10 @@ export class SettingsPersistance {
 
                     si.tokenSetters.forEach(ti => {
                         let localtoken = localschedule.tokens.find(t=>t.id==ti.id)
+                        if (!localtoken) {
+                            console.log('Token setter refers to missing token id: ' + ti.id + ' in schedule: ' + localschedule.name);
+                            return;
+                        }
                         let localTokenSetter:TokenSetter;
                         if (localtoken.type == 'boolean') { localTokenSetter = new TokenSetter(localsi, localtoken,Boolean(ti.value)); }
                         else if (localtoken.type == 'string') { localTokenSetter = new TokenSetter(localsi, localtoken,ti.value); }
@@ -373,7 +381,7 @@ export class SettingsPersistance {
                             }
                         //console.log('pushing setter');
 
-                        localsi.tokenSetters.push(localTokenSetter);
+                        if (localTokenSetter) localsi.tokenSetters.push(localTokenSetter);
                         //console.log('pushed setter');
                     });
 
