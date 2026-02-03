@@ -34,6 +34,7 @@ export class TriggerHandler {
     private triggers:Trigger[];
     private runningtimer:NodeJS.Timeout;
     private localTimeZone:string;
+    private readonly shortDayNames = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
     constructor(homeyApp:HomeyApp, settings:ASSettings, flowandtokenhandler:FlowAndTokenHandler, sunWrapper:SunWrapper) {
         this.selfie=this;
@@ -69,11 +70,9 @@ export class TriggerHandler {
                         //this.homeyApp.log('before addScheduleItemToTriggers, date: ' + now);
                         //this.homeyApp.log('before addScheduleItemToTriggers, yesterday: ' + yesterday);
                         
-                        this.homeyApp.log('Testing triggers from day before, that might stretch till current day due to randomness or similar.');
                         this.addScheduleItemToTriggers(mode, yesterday, schedule, scheduleitem);
                         this.homeyApp.log('Testing triggers from current day.');
                         this.addScheduleItemToTriggers(mode, now, schedule, scheduleitem);
-                        this.homeyApp.log('Testing triggers from day after, that might stretch till current day due to randomness or similar.');
                         this.addScheduleItemToTriggers(mode, tomorrow, schedule, scheduleitem);
                     }
                 })
@@ -85,7 +84,13 @@ export class TriggerHandler {
 
         this.homeyApp.log('Summary all triggers');
         this.triggers.forEach(trigger => {
-            this.homeyApp.log('Schedule: ' + trigger.schedule.name + ', time: ' + trigger.triggerTime.toString() + '(' + trigger.scheduleItem.mainTrigger.sunEvent + ')');
+            this.homeyApp.log(
+                'Schedule: ' + trigger.schedule.name +
+                ', si: ' + trigger.scheduleItem.id +
+                ', time: ' + trigger.triggerTime.toString() +
+                (trigger.scheduleItem.mainTrigger.sunEvent ? '(' + trigger.scheduleItem.mainTrigger.sunEvent + ')' : '') +
+                ', days: ' + trigger.scheduleItem.daysArg + '(' + this.formatDaysMask(trigger.scheduleItem.daysArg) + ')'
+            );
         })
 
         this.homeyApp.log('Setting up Triggers done');
@@ -172,8 +177,20 @@ export class TriggerHandler {
 
         triggerTime = this.getTriggerTime(si, dateAtMidnightCallingDate);
         if (!this.isValidDate(triggerTime)) {
-            this.homeyApp.log('Not a valid date to trigger on. Not added.') ;
+            this.logSkip('invalid-trigger-time', s, si, triggerTime, dateAtMidnightCallingDate);
             return; //
+        }
+
+        let dateNextMidnight = dateAtMidnightToday.plus({days:1});
+        let isSameDay = dateAtMidnightCallingDate.toMillis() === dateAtMidnightToday.toMillis();
+        if (!isSameDay && triggerTime >= dateAtMidnightToday && triggerTime < dateNextMidnight) {
+            this.homeyApp.log(
+                'Spillover trigger candidate from ' +
+                dateAtMidnightCallingDate.toISODate() +
+                ' into today: schedule=' + s.name +
+                ', si=' + si.id +
+                ', time=' + triggerTime.toString()
+            );
         }
 
 
@@ -181,12 +198,19 @@ export class TriggerHandler {
             let onlyTriggerIfBeforeTime = this.getTimeInfoTime(si.onlyTriggerIfBefore, dateAtMidnightCallingDate)
             if (this.isValidDate(onlyTriggerIfBeforeTime)) {
                 if (triggerTime >= onlyTriggerIfBeforeTime) {
-                    this.homeyApp.log('Not added as trigger is after before-condition: ' + triggerTime + ' >= ' + onlyTriggerIfBeforeTime) ;
+                    this.logSkip(
+                        'after-before-condition',
+                        s,
+                        si,
+                        triggerTime,
+                        dateAtMidnightCallingDate,
+                        'trigger=' + triggerTime.toString() + ' >= before=' + onlyTriggerIfBeforeTime.toString()
+                    );
                     return; //
                 }
             }
             else {
-                this.homeyApp.log('Only trigger if before is not a valid date. Not evaluated');
+                this.homeyApp.log('Only trigger if before is not a valid date. Not evaluated. schedule: ' + s.name + ', si: ' + si.id);
             }
         }
 
@@ -194,33 +218,48 @@ export class TriggerHandler {
             let onlyTriggerIfAfterTime = this.getTimeInfoTime(si.onlyTriggerIfAfter, dateAtMidnightCallingDate)
             if (this.isValidDate(onlyTriggerIfAfterTime)) {
                 if (triggerTime <= onlyTriggerIfAfterTime) {
-                    this.homeyApp.log('Not added as trigger is before after-condition: ' + triggerTime + ' <= ' + onlyTriggerIfAfterTime) ;
+                    this.logSkip(
+                        'before-after-condition',
+                        s,
+                        si,
+                        triggerTime,
+                        dateAtMidnightCallingDate,
+                        'trigger=' + triggerTime.toString() + ' <= after=' + onlyTriggerIfAfterTime.toString()
+                    );
                     return; //
                 }
             }
             else {
-                this.homeyApp.log('Only trigger if after is not a valid date. Not evaluated');
+                this.homeyApp.log('Only trigger if after is not a valid date. Not evaluated. schedule: ' + s.name + ', si: ' + si.id);
             }
         }
 
         if (!this.dayHitTest(si.daysType, si.daysArg, date)){
-            this.homeyApp.log('Dayhit failed ' + s.name + ', time: ' + triggerTime.toString()) ;
+            let dayofweek = date.setZone(this.localTimeZone).weekday;
+            let dayName = this.shortDayNames[dayofweek - 1] || String(dayofweek);
+            this.logSkip(
+                'dayhit-failed',
+                s,
+                si,
+                triggerTime,
+                dateAtMidnightCallingDate,
+                'weekday=' + dayofweek + '(' + dayName + '), daysArg=' + si.daysArg + '(' + this.formatDaysMask(si.daysArg) + ')'
+            );
             return;
         }
 
-        let dateNextMidnight = dateAtMidnightToday.plus({days:1});
         //this.homeyApp.log('Trigger compare: ' + triggerTime.toString() + ' : ' + dateAtMidnightToday.toString() + ' : ' + dateNextMidnight.toString()) ;
 
         if (triggerTime<dateAtMidnightToday) {
-            this.homeyApp.log('Not added (before midnight): ' + s.name + ', time: ' + triggerTime.toString()) ;
+            this.logSkip('before-midnight', s, si, triggerTime, dateAtMidnightCallingDate);
             return; //time has already passed, a little crude but it will likely work :-)
         }
         else if (triggerTime>=dateNextMidnight) {
-            this.homeyApp.log('Not added (next day): ' + s.name + ', time: ' + triggerTime.toString()) ;
+            this.logSkip('next-day', s, si, triggerTime, dateAtMidnightCallingDate);
             return; //time will be added next round, a little crude but it will likely work :-)
 
         } else if (mode == 'startup' && triggerTime < now) {
-            this.homeyApp.log('Not added (before now): ' + s.name + ', time: ' + triggerTime.toString()) ;
+            this.logSkip('before-now', s, si, triggerTime, dateAtMidnightCallingDate, 'now=' + now.toString());
             return; //time has already passed, a little crude but it will likely work :-)
         }
         
@@ -228,9 +267,9 @@ export class TriggerHandler {
 
         this.triggers.push(trigger);
         if (trigger.scheduleItem.mainTrigger.timeType == TimeType.TimeOfDay)
-            this.homeyApp.log('Trigger added, schedule: ' + trigger.schedule.name + ', Time: ' + trigger.triggerTime.toString());
+            this.homeyApp.log('Trigger added, schedule: ' + trigger.schedule.name + ', si: ' + trigger.scheduleItem.id + ', Time: ' + trigger.triggerTime.toString());
         else if (trigger.scheduleItem.mainTrigger.timeType == TimeType.Solar)
-            this.homeyApp.log('Trigger added, schedule: ' + trigger.schedule.name + ', Solar: ' + trigger.scheduleItem.mainTrigger.sunEvent + '(' + trigger.triggerTime.toString() + ')');
+            this.homeyApp.log('Trigger added, schedule: ' + trigger.schedule.name + ', si: ' + trigger.scheduleItem.id + ', Solar: ' + trigger.scheduleItem.mainTrigger.sunEvent + '(' + trigger.triggerTime.toString() + ')');
         //this.homeyApp.log(trigger);        
     }
 
@@ -287,6 +326,31 @@ export class TriggerHandler {
 
     private dec2bin(dec){
         return (dec >>> 0).toString(2);
+    }
+
+    private formatDaysMask(days:number):string {
+        let names:string[] = [];
+        for (let i = 1; i <= 7; i++) {
+            if ((days & (1 << (i - 1))) !== 0) {
+                names.push(this.shortDayNames[i - 1] || String(i));
+            }
+        }
+        return names.length ? names.join(',') : 'none';
+    }
+
+    private logSkip(reason:string, s:Schedule, si:ScheduleItem, triggerTime:DateTime, date:DateTime, extra?:string) {
+        let dateStr = date ? date.toISODate() : 'unknown';
+        let timeStr = triggerTime ? triggerTime.toString() : 'null';
+        let msg =
+            'Skip trigger: reason=' + reason +
+            ', schedule=' + s.name +
+            ', si=' + si.id +
+            ', date=' + dateStr +
+            ', time=' + timeStr +
+            ', daysType=' + DaysType[si.daysType] +
+            ', daysArg=' + si.daysArg + '(' + this.formatDaysMask(si.daysArg) + ')';
+        if (extra) msg += ', ' + extra;
+        this.homeyApp.log(msg);
     }
     
     private timerCallback(arg: 'execute'|'next'|'idle'|'midnight') {
