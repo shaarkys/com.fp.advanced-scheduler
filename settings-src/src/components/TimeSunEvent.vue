@@ -1,6 +1,6 @@
 <template>
     <!-- The whole component expects a TimeInfo object in the v-model-->
-    <v-form v-model="validInput" @input="$emit('update:validInput', validInput);">
+    <v-form v-model="localValidInput" @input="handleFormValidity">
         <v-row>
             <v-radio-group
                 v-model="value.timeType"
@@ -54,9 +54,6 @@
 //The whole component expects a TimeInfo object in the v-model
 
 import { TimeInfo } from '../../../.homeybuild/src/CommonContainerClasses';
-import { SunWrapper } from '../../../.homeybuild/src/SunWrapper';
- 
-
 export default {
   name: 'AsvTimeSunEvent',
   components: {
@@ -75,34 +72,24 @@ export default {
   },
   data() {
     return {
-        timeValid: true,
-        sunEventTypeValid: true,
-        solarOffsetValid: true,
+        localValidInput: Boolean(this.validInput),
         rules: {
 
             isOffsetMaxOneDay: [
                 value => {
-                                    
                     const pattern = /^(-?)([01]\d?|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
-                    this.solarOffsetValid = pattern.test(value) 
-                    this.updateValid();
-                    return this.solarOffsetValid || this.$t('Enter_offset_in_format')
+                    return pattern.test(value) || this.$t('Enter_offset_in_format')
                 }
             ],
             isTime: [
                 value => {
                     const pattern = /^([01]\d?|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
-                    this.timeValid = pattern.test(value); 
-                    this.updateValid();
-                    return this.timeValid || this.$t('Enter_time_in_format');
+                    return pattern.test(value) || this.$t('Enter_time_in_format');
                 }
             ],
             suneventvalid: [
                 value => {
-                    //console.log('suneventisvalid value: ' + value + '   (!(value!="") ' + !(value!=""));
-                    this.sunEventTypeValid = !(value=='' || value === undefined);
-                    this.updateValid();
-                    return this.sunEventTypeValid || this.$t('Select_event');
+                    return !(value==='' || value === undefined || value === null) || this.$t('Select_event');
                 }
             ],
 
@@ -112,17 +99,26 @@ export default {
     methods : {
 
         handleInput : function () {
+            this.updateValid();
             this.$emit('input', this.value)
         },
 
+        handleFormValidity : function (valid) {
+            this.localValidInput = Boolean(valid);
+            this.$emit('update:validInput', this.localValidInput);
+        },
+
         updateValid : function (){
+            let valid = false;
             if (this.value.timeType==1) {
-                this.validInput = this.timeValid;
+                valid = /^([01]\d?|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(this.value.time);
             }
             else if (this.value.timeType==2) {
-                this.validInput = this.sunEventTypeValid && this.solarOffsetValid;
+                const hasSunEvent = !(this.value.sunEvent==='' || this.value.sunEvent === undefined || this.value.sunEvent === null);
+                const validOffset = /^(-?)([01]\d?|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(this.value.solarOffset);
+                valid = hasSunEvent && validOffset;
             }
-
+            this.handleFormValidity(valid);
         },
 
         translateSunEvents: function (sunEvents) {
@@ -140,16 +136,15 @@ export default {
         },
         
         getSunEvents : function (){
-            let sw = this.$root.$children[0].sunWrapper;
-
-            let suntimes = sw.getTimes(new Date());
-            
-            //console.log('suntimes');
-            //console.log(suntimes);
-            return suntimes;
+            const app = this.$root && this.$root.$children ? this.$root.$children[0] : null;
+            const sunWrapper = app ? app.sunWrapper : null;
+            if (!sunWrapper || typeof sunWrapper.getTimes !== 'function') return [];
+            return sunWrapper.getTimes(new Date());
         },
     },
-  
+    mounted() {
+        this.updateValid();
+    },
 
 };
 </script>

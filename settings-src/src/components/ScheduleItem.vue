@@ -147,7 +147,7 @@
                                 </v-container>
                             </v-card-text>
                         </v-card>
-                    </v-form>>
+                    </v-form>
                 </v-dialog>
             </v-col>
         </v-row>
@@ -180,7 +180,7 @@
 
                 <v-dialog v-model="addTokenSetterOpen" > <!-- max-width="290"-->
                     <template v-slot:activator="{ on, attrs }">
-                        <v-btn color="green darken-1" :disabled="getNonAddedTokenSetters().lenght==0" text v-bind="attrs" v-on="on"><v-icon dark>mdi-plus-circle-outline</v-icon> {{ $t('Add_new_token_setter') }}</v-btn>
+                        <v-btn color="green darken-1" :disabled="getNonAddedTokenSetters().length==0" text v-bind="attrs" v-on="on"><v-icon dark>mdi-plus-circle-outline</v-icon> {{ $t('Add_new_token_setter') }}</v-btn>
                     </template>
                     <v-card>
                         <v-card-title class="headline">{{ $t('Add_token_setter') }}</v-card-title>

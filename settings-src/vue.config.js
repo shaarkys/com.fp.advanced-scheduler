@@ -9,7 +9,11 @@ module.exports = {
   css: {
     loaderOptions: {
         sass: {
-            additionalData: '@import "@/styles/main.scss"'
+            additionalData: '@import "@/styles/main.scss"',
+            sassOptions: {
+                // Vuetify 2 still uses the legacy Sass syntax and API.
+                silenceDeprecations: ['legacy-js-api', 'import', 'global-builtin', 'color-functions', 'slash-div', 'if-function']
+            }
         }
     }
   },

@@ -5,14 +5,16 @@
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <title><%= htmlWebpackPlugin.options.title %></title>
-  <script type="text/javascript" src="/homey.js" data-origin="settings"></script>
   <script>
+    window.homeySettings = window.homeySettings || { Homey: null };
+
     function onHomeyReady(Homey) {
-      //Dispatch an event
-      const evt = new CustomEvent('onHomeyReady', {detail: Homey});
+      window.homeySettings.Homey = Homey;
+      const evt = new CustomEvent('homey-settings-ready', { detail: Homey });
       window.dispatchEvent(evt);
     }
   </script>
+  <script type="text/javascript" src="/homey.js" data-origin="settings"></script>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:100,300,400,500,700,900">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@latest/css/materialdesignicons.min.css">
 </head>

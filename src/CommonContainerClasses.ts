@@ -22,17 +22,10 @@ export class ASSettings {
     }
 
     deleteSchedule(id:number):boolean{
-        this.schedules.forEach(schedule => {
-            if (schedule.id == id) {
-                var index = this.schedules.indexOf(schedule);
-                if (index !== -1) {
-                    this.schedules.splice(index, 1);
-                    //console.log('Deleted schedule with id: ' + schedule.id)
-                    return true;
-                }
-            }
-        })
-        return false;
+        const index = this.schedules.findIndex(schedule => schedule.id == id);
+        if (index === -1) return false;
+        this.schedules.splice(index, 1);
+        return true;
     }
 }
 
@@ -76,16 +69,10 @@ export class Schedule {
 
 
     deleteToken(id:number):boolean{
-        this.tokens.forEach(token => {
-            if (token.id == id){
-                var index = this.tokens.indexOf(token);
-                if (index !== -1) {
-                    this.tokens.splice(index, 1);
-                    return true;
-                }
-            }
-        })
-        return false;
+        const index = this.tokens.findIndex(token => token.id == id);
+        if (index === -1) return false;
+        this.tokens.splice(index, 1);
+        return true;
     }
 
 
@@ -104,7 +91,9 @@ export class Schedule {
                 timeType:TimeType,
                 sunEventType:string,
                 timeArg:string):ScheduleItem{
-        let newSI = new ScheduleItem(this, id, dayType, daysArg, new TimeInfo(timeType, sunEventType, timeArg, "00:00"));
+        let newSI = new ScheduleItem(this, id, dayType, daysArg,
+            new TimeInfo(timeType, timeType === TimeType.TimeOfDay ? timeArg : "",
+                timeType === TimeType.Solar ? sunEventType : "", timeType === TimeType.Solar ? timeArg : "00:00"));
 
         this.tokens.forEach(token=>{
             newSI.addNewTokenSetterByIdNoVal(token.id);
@@ -117,16 +106,10 @@ export class Schedule {
 
 
     deleteScheduleItem(id:number):boolean{
-        this.scheduleItems.forEach(si => {
-            if (si.id == id) {
-                var index = this.scheduleItems.indexOf(si);
-                if (index !== -1) {
-                    this.scheduleItems.splice(index, 1);
-                    return true;
-                }
-            }
-        })
-        return false;
+        const index = this.scheduleItems.findIndex(si => si.id == id);
+        if (index === -1) return false;
+        this.scheduleItems.splice(index, 1);
+        return true;
     }
 
 }
@@ -297,7 +280,7 @@ export class ScheduleItem {
 
     set daysArg(value:number){
         let arr:number[] = new Array();
-        for (let i = 1; i<=7; i++) {
+        for (let i = 1; i <= (this.daysType === DaysType.DaysOfMonth ? 31 : 7); i++) {
             if ((Math.pow(2,i-1) & value) != 0)
                 arr.push(i);
         }
@@ -366,23 +349,17 @@ export class ScheduleItem {
     }
 
     addNewTokenSetterByIdNoVal(tokenid:number):TokenSetter{
-        this.schedule.tokens.forEach(token => {
-            if (token.id == tokenid){
-                if (token.type === 'string') return this.addNewTokenSetterInternal(token, '') 
-                else if (token.type === 'number') return this.addNewTokenSetterInternal(token, 0) 
-                else if (token.type === 'boolean') return this.addNewTokenSetterInternal(token, false) 
-            }
-        })
+        const token = this.schedule.tokens.find(token => token.id == tokenid);
+        if (!token) return null;
+        if (token.type === 'string') return this.addNewTokenSetterInternal(token, '');
+        if (token.type === 'number') return this.addNewTokenSetterInternal(token, 0);
+        if (token.type === 'boolean') return this.addNewTokenSetterInternal(token, false);
         return null;
     }
 
     addNewTokenSetterByIdWithVal(tokenid:number, value:any):TokenSetter{
-        this.schedule.tokens.forEach(token => {
-            if (token.id == tokenid){
-                return this.addNewTokenSetterInternal(token, value)
-            }
-        })
-        return null;
+        const token = this.schedule.tokens.find(token => token.id == tokenid);
+        return token ? this.addNewTokenSetterInternal(token, value) : null;
     }
 
     addNewTokenSetterInternal(token:Token, value:any):TokenSetter{
@@ -392,16 +369,10 @@ export class ScheduleItem {
     }
 
     deleteTokenSetter(tokenid):boolean{
-        this.tokenSetters.forEach(ts => {
-            if (ts.token.id == tokenid) {
-                var index = this.tokenSetters.indexOf(ts);
-                if (index !== -1) {
-                    this.tokenSetters.splice(index, 1);
-                    return true;
-                }
-            }
-        })
-        return false;
+        const index = this.tokenSetters.findIndex(ts => ts.token.id == tokenid);
+        if (index === -1) return false;
+        this.tokenSetters.splice(index, 1);
+        return true;
     }
 
 }

@@ -196,21 +196,93 @@ export class SettingsPersistance {
     }
 
     readSettings(settings:string):number {
-        let version = this.getSettingsVersion(settings);
-        
-        if (version == 1) {
-            this.readSettingsVersion1(settings);
-            return version;
-        }
-        else if (version == 2){
-            this.readSettingsVersion2(settings);
-            return version;
-        }
-        else {
-            //create empty settings
+        if (settings == null) {
             this.settings = new ASSettings();
             return -1;
         }
+        const json = JSON.parse(settings);
+        const version = json?.settingsVersion === undefined ? 1 : json.settingsVersion;
+        if (version !== 1 && version !== 2) throw new Error('Unsupported settings version: ' + version);
+        if (!Array.isArray(json?.settings?.schedules)) throw new Error('Settings must contain a schedules array');
+        const ids = new Set<number>();
+        json.settings.schedules.forEach(schedule => {
+            const id = Number(schedule.id);
+            if (!Number.isSafeInteger(id) || id < 1 || ids.has(id)) throw new Error('Invalid or duplicate schedule id');
+            ids.add(id);
+            if (typeof schedule.name !== 'string' || typeof schedule.active !== 'boolean' || !Array.isArray(schedule.tokens)) {
+                throw new Error('Invalid schedule: ' + id);
+            }
+            const tokenIds = new Set<number>();
+            schedule.tokens.forEach(token => {
+                const tokenId = Number(token.id);
+                if (!Number.isSafeInteger(tokenId) || tokenId < 1 || tokenIds.has(tokenId) ||
+                    typeof token.name !== 'string' || !['boolean', 'number', 'string'].includes(token.type)) {
+                    throw new Error('Invalid or duplicate token in schedule: ' + id);
+                }
+                tokenIds.add(tokenId);
+            });
+            const items = version === 1 ? schedule.scheduleitems : schedule.scheduleItems;
+            if (!Array.isArray(items)) throw new Error('Missing schedule items: ' + id);
+            const itemIds = new Set<number>();
+            items.forEach(item => {
+                const itemId = Number(item.id);
+                const daysType = version === 1 ? item.daystype : item.daysType;
+                const days = version === 1 ? item.daysarg : item.daysArg;
+                if (!Number.isSafeInteger(itemId) || itemId < 1 || itemIds.has(itemId) ||
+                    !(version === 1 ? ['daysofweek', 'daysofmonth'] : ['daysOfWeek', 'daysOfMonth']).includes(daysType) ||
+                    !Number.isInteger(days) || days < 0 || days > (daysType.toLowerCase() === 'daysofweek' ? 127 : 2147483647)) {
+                    throw new Error('Invalid schedule item: ' + itemId);
+                }
+                itemIds.add(itemId);
+                if (version === 1) {
+                    const solar = typeof item.timetype === 'string' && item.timetype.startsWith('solar:');
+                    this.validateTimeInfo(solar ? {timeType:'solar', sunEvent:item.timetype.slice(6), solarOffset:item.timearg} :
+                        {timeType:item.timetype === 'timeofday' ? 'timeOfDay' : item.timetype, time:item.timearg});
+                } else {
+                    this.validateTimeInfo(item.mainTrigger);
+                    ['randomTrigger', 'triggerFirstOf', 'triggerLastOf', 'onlyTriggerIfBefore', 'onlyTriggerIfAfter'].forEach(key => {
+                        if (item[key] != null) this.validateTimeInfo(item[key]);
+                    });
+                }
+                const setters = version === 1 ? item.tokensetters : item.tokenSetters;
+                if (!Array.isArray(setters)) throw new Error('Missing token setters: ' + itemId);
+                const setterIds = new Set<number>();
+                setters.forEach(setter => {
+                    const setterId = Number(setter.id);
+                    if (!Number.isSafeInteger(setterId) || setterIds.has(setterId)) throw new Error('Invalid or duplicate token setter');
+                    setterIds.add(setterId);
+                    const token = schedule.tokens.find(token => Number(token.id) === setterId);
+                    if (!token) return; // Legacy settings may contain setters for deleted tokens.
+                    if (token.type === 'boolean' && typeof setter.value !== 'boolean') throw new Error('Invalid boolean token value');
+                    if (token.type === 'string' && typeof setter.value !== 'string') throw new Error('Invalid string token value');
+                    if (token.type === 'number' && (!(typeof setter.value === 'number' || typeof setter.value === 'string') ||
+                        (typeof setter.value === 'string' && setter.value.trim() === '') ||
+                        !Number.isFinite(Number(typeof setter.value === 'string' ? setter.value.replace(',', '.') : setter.value)))) {
+                        throw new Error('Invalid numeric token value');
+                    }
+                });
+            });
+        });
+        const previousSettings = this.settings;
+        const count = version === 1 ? this.readSettingsVersion1(settings) : this.readSettingsVersion2(settings);
+        if (count < 0) {
+            this.settings = previousSettings;
+            throw new Error('Unable to read settings version: ' + version);
+        }
+        return version;
+    }
+
+    private validateTimeInfo(info:any) {
+        const solarEvents = ['nightEnd', 'astronomicalDawn', 'nauticalDawn', 'blueHourMorningStart', 'dawn',
+            'blueHourMorningEnd', 'goldenHourMorningStart', 'sunrise', 'sunriseEnd', 'goldenHourMorningEnd',
+            'solarNoon', 'goldenHourEveningStart', 'sunsetStart', 'sunset', 'goldenHourEveningEnd',
+            'blueHourEveningStart', 'dusk', 'blueHourEveningEnd', 'nauticalDusk', 'astronomicalDusk', 'night', 'nadir'];
+        const time = /^([01]?\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+        const offset = /^-?([01]?\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+        if (info?.timeType === 'timeOfDay' && typeof info.time === 'string' && time.test(info.time)) return;
+        if (info?.timeType === 'solar' && solarEvents.includes(info.sunEvent) &&
+            (info.solarOffset == null || info.solarOffset === '' || offset.test(info.solarOffset))) return;
+        throw new Error('Invalid time or solar event configuration');
     }
 
     getSettingsVersion(settings:string):number {
@@ -296,7 +368,7 @@ export class SettingsPersistance {
                         let localTokenSetter:TokenSetter;
                         if (localtoken.type == 'boolean') { localTokenSetter = new TokenSetter(localsi, localtoken,Boolean(ti.value)); }
                         else if (localtoken.type == 'string') { localTokenSetter = new TokenSetter(localsi, localtoken,ti.value); }
-                        else if (localtoken.type == 'number') { localTokenSetter = new TokenSetter(localsi, localtoken,Number(ti.value)); }
+                        else if (localtoken.type == 'number') { localTokenSetter = new TokenSetter(localsi, localtoken,Number(typeof ti.value === 'string' ? ti.value.replace(',', '.') : ti.value)); }
                         else { 
                         //    if (this.homeyApp != null) this.homeyApp.log('Incorrect type for tokenSetter');
                             }
@@ -375,7 +447,7 @@ export class SettingsPersistance {
                         let localTokenSetter:TokenSetter;
                         if (localtoken.type == 'boolean') { localTokenSetter = new TokenSetter(localsi, localtoken,Boolean(ti.value)); }
                         else if (localtoken.type == 'string') { localTokenSetter = new TokenSetter(localsi, localtoken,ti.value); }
-                        else if (localtoken.type == 'number') { localTokenSetter = new TokenSetter(localsi, localtoken,Number(ti.value)); }
+                        else if (localtoken.type == 'number') { localTokenSetter = new TokenSetter(localsi, localtoken,Number(typeof ti.value === 'string' ? ti.value.replace(',', '.') : ti.value)); }
                         else { 
                         //    if (this.homeyApp != null) this.homeyApp.log('Incorrect type for tokenSetter');
                             }
@@ -406,7 +478,7 @@ export class SettingsPersistance {
     parseJsonTimeInfo(timeInfo:any):TimeInfo {
         //console.log('parse start');
 
-        if (timeInfo === undefined) {
+        if (timeInfo == null) {
             //console.log('returning blank TimeInfo');
             return new TimeInfo(TimeType.TimeOfDay,"","","");
         }

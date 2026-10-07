@@ -11,10 +11,24 @@ import { VTextField } from 'vuetify/lib'  //Globally import VTextField for Trees
 
 Vue.config.productionTip = false;
 
-//Listen for the event when Homey is ready
-window.addEventListener('onHomeyReady', function (event) {
-  const Homey = event.detail;
-  console.log('Getting Homey');
+Vue.component('v-text-field', VTextField); // Needed for treeshaking to work with VCurrencyField
+Vue.use(VCurrencyField, {
+  locale: 'en-GB',
+  decimalLength: {min:0, max:4},
+  autoDecimalMode: false,
+  min: null,
+  max: null,
+  defaultValue: 0,
+  valueAsInteger: false,
+  allowNegative: true
+});
+
+let mounted = false;
+
+function mountSettings(Homey) {
+  if (mounted || !Homey) return;
+  mounted = true;
+
   Vue.mixin({
     data() {
       return {
@@ -25,31 +39,21 @@ window.addEventListener('onHomeyReady', function (event) {
     }
   });
 
-  new Vue( 
-    {
-    i18n,  
-    render: h => h(App),
-    vuetify,
-//    components: {
-//      onlyFloat,
-//    },
-    mounted() {
-      this.Homey.ready();
-    }
+  try {
+    new Vue({
+      i18n,
+      render: h => h(App),
+      vuetify,
+    }).$mount('#app');
+  } finally {
+    Homey.ready();
+  }
+}
 
-    
-  }).$mount('#app');
-  //Vue.use(VNumeric)
-  Vue.component('v-text-field', VTextField); //Needed for treeshaking to work with VCurrencyField
-  Vue.use(VCurrencyField, { 
-    locale: 'en-GB',
-    decimalLength: {min:0, max:4},
-    autoDecimalMode: false,
-    min: null,
-    max: null,
-    defaultValue: 0,
-      valueAsInteger: false,
-      allowNegative: true
-  })
-  
+window.addEventListener('homey-settings-ready', function (event) {
+  mountSettings(event.detail);
 }, false);
+
+if (window.homeySettings && window.homeySettings.Homey) {
+  mountSettings(window.homeySettings.Homey);
+}

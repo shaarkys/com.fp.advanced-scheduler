@@ -22,7 +22,7 @@
             <asv-schedule v-for="(schedule) in assettings.schedules" :key="schedule.id" :schedule="schedule" :settings="assettings" />
           </v-expansion-panels>
           <v-btn class="mt-2" color="green darken-1" text @click="addSchedule()"><v-icon dark>mdi-plus-circle-outline</v-icon> {{ $t('Add_new_schedule') }}</v-btn>
-          <v-btn class="mt-2" color="green darken-1" text @click="saveSettings()"><v-icon dark>mdi-content-save</v-icon> {{ $t('Save_settings') }}</v-btn>
+          <v-btn class="mt-2" color="green darken-1" text :disabled="!settingsLoaded" @click="saveSettings()"><v-icon dark>mdi-content-save</v-icon> {{ $t('Save_settings') }}</v-btn>
           <v-btn class="mt-2" color="green darken-1" text @click="getSettings()"><v-icon dark>mdi-download-circle-outline</v-icon> {{ $t('Reload_last_saved_settings') }}</v-btn>
         </v-tab-item>
         <v-tab-item key="suneventimes">
@@ -73,83 +73,82 @@ export default {
       assettings: new ASSettings(),
       tab: null,
       rawSettings:'',
+      settingsLoaded: false,
       sunWrapper: null,
+      sunTimezone: null,
     };
   },
   mounted() {
-    console.log('Mounted');
     this.getSettings();
     this.getLanguage();
-    this.getSunWrapper();    
-        
+    this.getSunWrapper();
   },
-    methods: {
-        getSettings : function() {
-            this.Homey.get('settings')
-            .then(settingstext => {
-            console.log('Raw settings: ' + settingstext);
-            let sp = new SettingsPersistance();
-            
+  methods: {
+        homeyGet : function(key) {
+            return new Promise((resolve, reject) => {
+                this.Homey.get(key, (err, value) => {
+                    if (err) reject(err);
+                    else resolve(value);
+                });
+            });
+        },
+
+        homeySet : function(key, value) {
+            return new Promise((resolve, reject) => {
+                this.Homey.set(key, value, err => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
+        },
+
+        alertError : function(error) {
+            const message = error && error.message ? error.message : String(error);
+            return this.Homey.alert(message);
+        },
+
+        parseSettings : function(settingstext) {
+            const sp = new SettingsPersistance();
             sp.readSettings(settingstext);
-            console.log('Settings read');
-            
-            let assettings = sp.getSettings();
-            console.log('Settings retrieved');
-            
-            if (assettings != null){
-                this.assettings = assettings;
-                console.log('Settings set');
+            return sp.getSettings() || new ASSettings();
+        },
+
+        getSettings : async function() {
+            this.settingsLoaded = false;
+            try {
+                const settingstext = await this.homeyGet('settings');
+                this.assettings = this.parseSettings(settingstext);
+                this.settingsLoaded = true;
+            } catch (err) {
+                await this.alertError(err);
             }
-            else
-            {
-                this.assettings = new ASSettings();
-                console.log('Settings set empty');
-            }
-            
-            })
-            .catch(err => {
-                this.Homey.alert(err);
-                console.log('Err settings' + err);
-            })
         },
 
         getLanguage : function() {
-            let language = 'en';
-            this.Homey.getLanguage()
-            .then( lang => {
-            console.log ('Lang found: ' + lang);
-            if  (
-                  lang == 'sv' || 
-                  lang == 'de' ||
-                  lang == 'nl' 
-                ) 
-            {
-                    language = lang;
+            try {
+                const language = this.Homey.__({ en: 'en', sv: 'sv', de: 'de', nl: 'nl' });
+                this.$i18n.locale = ['sv', 'de', 'nl'].includes(language) ? language : 'en';
+            } catch (err) {
+                this.$i18n.locale = 'en';
             }
-            this.$i18n.locale = language;
-            console.log('Language set to ' + language);
-            })
-            .catch(err => {
-                this.Homey.alert(err);
-                console.log('Err lang' + err);
-            })
-
         },
 
-        getSunWrapper : function () {
-            this.Homey.get('geolocation')
-            .then(geoinfo => {
-                let geo = JSON.parse(geoinfo)
-                let lat = geo.latitude;
-                let lon = geo.longitude;
-                console.log('Lat/lon: ' + lat + '/' + lon);
-                this.sunWrapper = new SunWrapper();
-                this.sunWrapper.webInit(lat,lon);
-            })
-            .catch(err => {
-                this.Homey.alert(err);
-                console.log('Err SunWrapper' + err);
-            })
+        getSunWrapper : async function () {
+            try {
+                const geoinfo = await this.homeyGet('geolocation');
+                const geo = typeof geoinfo === 'string' ? JSON.parse(geoinfo) : geoinfo;
+                if (!geo || geo.latitude === null || geo.longitude === null ||
+                    !Number.isFinite(Number(geo.latitude)) || !Number.isFinite(Number(geo.longitude))) {
+                    throw new Error('Invalid geolocation settings');
+                }
+
+                this.sunTimezone = typeof geo.timezone === 'string' && geo.timezone ? geo.timezone : null;
+                const sunWrapper = new SunWrapper();
+                sunWrapper.webInit(Number(geo.latitude), Number(geo.longitude), this.sunTimezone || undefined);
+                this.sunWrapper = sunWrapper;
+            } catch (err) {
+                await this.alertError(err);
+            }
         },
 
         setupWebApi : function () {
@@ -177,36 +176,45 @@ export default {
             
         },
 
-        saveSettings : function () {
-            var sp = new SettingsPersistance();
-            var settingstxt = sp.buildSettings(this.assettings)
-            
-            console.log('Settings:');
-            console.log(settingstxt);
-            
-            this.Homey.set('settings', settingstxt, function( err ){
-                if( err ) return this.Homey.alert( err );
-                
-            }.bind(this));
+        saveSettings : async function () {
+            try {
+                if (!this.settingsLoaded) {
+                    throw new Error('Settings have not loaded successfully');
+                }
+
+                const sp = new SettingsPersistance();
+                const settingstxt = sp.buildSettings(this.assettings);
+                this.parseSettings(settingstxt);
+                await this.homeySet('settings', settingstxt);
+            } catch (err) {
+                await this.alertError(err);
+            }
         },
 
-        saveRawSettings : function () {
-            this.Homey.set('settings', this.rawSettings, function( err ){
-                if( err ) return this.Homey.alert( err );
-                this.getSettings();
-            }.bind(this))
+        saveRawSettings : async function () {
+            try {
+                if (typeof this.rawSettings !== 'string' || this.rawSettings.trim() === '') {
+                    throw new Error('Raw settings cannot be empty');
+                }
+                if (JSON.parse(this.rawSettings) === null) {
+                    throw new Error('Raw settings cannot be null');
+                }
+
+                const parsedSettings = this.parseSettings(this.rawSettings);
+                await this.homeySet('settings', this.rawSettings);
+                this.assettings = parsedSettings;
+                this.settingsLoaded = true;
+            } catch (err) {
+                await this.alertError(err);
+            }
         },
 
         getRawSettings : function () {
-            var sp = new SettingsPersistance();
-            var settings = sp.buildSettings(this.assettings)
-            
-            console.log('Settings:');
-            console.log(settings);
-            this.rawSettings = settings;
+            const sp = new SettingsPersistance();
+            this.rawSettings = sp.buildSettings(this.assettings);
         },
 
-        openURL : function(urlType) {
+        openURL : async function(urlType) {
             try {
                 let url = "";
                 if (urlType=='Help') {
@@ -216,9 +224,9 @@ export default {
                     url = this.$t('Community_page_url');
                 }
                 
-                this.Homey.openURL(url);     
+                await this.Homey.openURL(url);
             } catch (error) {
-                this.Homey.alert(this.$t("Couldn't_open_page"));              
+                await this.Homey.alert(this.$t("Couldn't_open_page"));
             }
          
         }

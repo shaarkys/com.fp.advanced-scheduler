@@ -3,10 +3,8 @@
 import { App as HomeyApp } from "homey";
 import { MainApp as MainApp } from "./src/MainApp";
 
-var SunCalc = require('suncalc');
-
-
 class AdvSchedulerApp extends HomeyApp {
+  private mainApp: MainApp;
   /**
    * onInit is called when the app is initialized.
    */ 
@@ -17,9 +15,13 @@ class AdvSchedulerApp extends HomeyApp {
       //require(“inspector”).open(9229, “0.0.0.0”, true);
     }
 
-    let ma = new MainApp(this);
-    await ma.init();
+    this.mainApp = new MainApp(this);
+    await this.mainApp.init();
     this.log('Advanced Scheduler has been initialized');
+  }
+
+  async onUninit() {
+    await this.mainApp?.destroy();
   }
 }
 

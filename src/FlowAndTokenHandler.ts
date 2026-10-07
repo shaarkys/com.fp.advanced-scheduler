@@ -107,7 +107,8 @@ export class FlowAndTokenHandler {
                 */
 
         } catch (error) {
-            this.homeyApp.log('Not able to setup Flows! Error: ' + error);
+            this.homeyApp.error('Unable to set up Flows:', error);
+            throw error;
         }
 
         this.homeyApp.log('Setting up Flows done');
@@ -191,8 +192,7 @@ export class FlowAndTokenHandler {
 
     async setTokenValue(token:Token, value:any): Promise<void> {
         if (this.tokenWrappers == null || this.tokenWrappers.length === 0) {
-            this.homeyApp.log('No tokens registered when attempting to set value. Token: ' + token.name);
-            return;
+            throw new Error('No tokens registered for: ' + token.name);
         }
         let ftw:TokenWrapper;
 
@@ -200,7 +200,8 @@ export class FlowAndTokenHandler {
         //this.homeyApp.log('in list with ' + this.tokenWrappers.length + ' elements.');
         //this.homeyApp.log(this.tokenwrappers);
 
-        ftw = this.tokenWrappers.find(tw=>tw.token.id == token.id);
+        const tokenId = 'schedule' + token.schedule.id + '-token' + token.id;
+        ftw = this.tokenWrappers.find(tw=>tw.flowToken.id === tokenId);
         if (ftw != null) {
             let t = ftw.token;
             let ft = ftw.flowToken;
@@ -217,23 +218,24 @@ export class FlowAndTokenHandler {
                         rawValue = rawValue.replace(',', '.');
                     }
                     let num = (typeof rawValue === 'number') ? rawValue : Number(rawValue);
-                    if (Number.isNaN(num)) {
-                        this.homeyApp.log('Invalid number for token: ' + t.name + '. Defaulting to 0. Value: ' + value);
+                    if (!Number.isFinite(num)) {
+                        this.homeyApp.log('Invalid number for token: ' + t.name + '. Defaulting to 0.');
                         num = 0;
                     }
                     await ft.setValue(num);
                 }
-                this.homeyApp.log('Token: ' + t.name + ', value set to: ' + value);
+                this.homeyApp.log('Token value updated: ' + t.name);
             } catch (error) {
-                this.homeyApp.log('Unable to set token value for: ' + t.name + '. Error: ' + error);
+                this.homeyApp.error('Unable to set token value for: ' + t.name, error);
+                throw error;
             }
         }
         else{
-            this.homeyApp.log('No tokens found when attempting to set value. Nothing done. Token: ' + token.name);
+            throw new Error('No token registered for: ' + token.name);
         }
     }
 
-    triggerFlow(tokens:Token[],trigger:Trigger){
+    async triggerFlow(tokens:Token[],trigger:Trigger):Promise<void>{
         //this.homeyApp.log('Trigger Flow started');
         let fct:FlowCardTrigger = <FlowCardTrigger>this.homey.flow.getTriggerCard('schedule_trigger');
         
@@ -244,7 +246,7 @@ export class FlowAndTokenHandler {
             mts.push(mt);
         });
         
-        fct.trigger(mts, ms);
+        await fct.trigger({}, ms);
         //this.homeyApp.log('Triggered schedule item: ' + trigger);
     }
 }

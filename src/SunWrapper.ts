@@ -1,6 +1,7 @@
 'use strict';
 
-import SunCalc = require('suncalc');
+import type * as SunCalcTypes from 'suncalc' with { "resolution-mode": "import" };
+const SunCalc: typeof SunCalcTypes = require('suncalc');
 import { DateTime } from "luxon";
 
 export class SunWrapper {
@@ -9,6 +10,7 @@ export class SunWrapper {
     private homeyApp;
     private lat:number;
     private lon:number;
+    private timezone:string;
 
     constructor() {
         
@@ -27,7 +29,7 @@ export class SunWrapper {
         this.lat = lat;
         this.lon = lon;
 
-        this.homeyApp.log('Retreived latitude: ' + this.lat + '. Retreived longitude: ' + this.lon);
+        this.timezone = this.homey.clock.getTimezone();
 
         //this.refreshTimes();
         this.addExtras();
@@ -35,18 +37,26 @@ export class SunWrapper {
         this.homeyApp.log('Advanced Scheduler SunWrapper has been initialized');
     }
 
-    webInit(lat,lon) {
+    webInit(lat,lon, timezone?:string) {
         this.lat = lat;
         this.lon = lon;
+        this.timezone = timezone;
 
         this.addExtras();
     }
 
     addExtras() {
-        SunCalc.addTime(-4, "goldenHourMorningStart","goldenHourEveningEnd");
-        SunCalc.addTime(-4, "blueHourMorningEnd","blueHourEveningStart");
-        SunCalc.addTime(-8, "blueHourMorningStart","blueHourEveningEnd");
-        SunCalc.addTime(-18, "astronomicalDawn","astronomicalDusk");        
+        const extras: Array<[number, string, string]> = [
+            [-4, "goldenHourMorningStart", "goldenHourEveningEnd"],
+            [-4, "blueHourMorningEnd", "blueHourEveningStart"],
+            [-8, "blueHourMorningStart", "blueHourEveningEnd"],
+            [-18, "astronomicalDawn", "astronomicalDusk"]
+        ];
+        extras.forEach(([angle, morning, evening]) => {
+            if (!SunCalc.times.some(row => row[1] === morning && row[2] === evening)) {
+                SunCalc.addTime(angle, morning, evening);
+            }
+        });
     }
 
     
@@ -57,7 +67,8 @@ export class SunWrapper {
         //var midday = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0, 0);
         
 //        let times = SunCalc.getTimes(midday, this.lat, this.lon);        
-        let times = SunCalc.getTimes(date, this.lat, this.lon);        
+        const localDate = DateTime.fromJSDate(date, this.timezone ? { zone: this.timezone } : {});
+        let times = SunCalc.getTimes(date, this.lat, this.lon, 0, localDate.offset);
 
         return [ 
             new SunEventInfo("nightEnd","Night End", times.nightEnd),
@@ -113,10 +124,10 @@ export class SunWrapper {
 }
 
 export class SunEventInfo{
-    constructor(id:string,desc:string,time:Date){
+    constructor(id:string,desc:string,time:Date | boolean | null | undefined){
         this.id = id;
         this.desc = desc;
-        this.time = time;
+        this.time = time instanceof Date ? time : new Date(NaN);
     }
 
     id:string;

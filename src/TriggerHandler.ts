@@ -34,6 +34,10 @@ export class TriggerHandler {
     private triggers:Trigger[];
     private runningtimer:NodeJS.Timeout;
     private localTimeZone:string;
+    private timerGeneration = 0;
+    private timerActive = false;
+    private triggerDate:string;
+    private randomTimes = new Map<string, {date:string, time:DateTime}>();
     private readonly shortDayNames = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
     constructor(homeyApp:HomeyApp, settings:ASSettings, flowandtokenhandler:FlowAndTokenHandler, sunWrapper:SunWrapper) {
@@ -47,23 +51,32 @@ export class TriggerHandler {
     setSettings(settings:ASSettings)
     {
         this.settings = settings;
+        this.randomTimes.clear();
     }
 
     setupTriggers(mode:'startup'|'midnight'){
-        this.localTimeZone = this.homeyApp.homey.clock.getTimezone();
+        const timezone = this.homeyApp.homey.clock.getTimezone();
+        if (timezone !== this.localTimeZone) this.randomTimes.clear();
+        this.localTimeZone = timezone;
         this.homeyApp.log("Local timezone: " + this.localTimeZone);
         this.homeyApp.log('Setting up Triggers');
 
         this.triggers = new Array();
+        const now = DateTime.now().setZone(this.localTimeZone);
+        this.triggerDate = now.toISODate();
+        const firstDate = now.minus({days:1}).toISODate();
+        const lastDate = now.plus({days:1}).toISODate();
+        this.randomTimes.forEach((sample, key) => {
+            if (sample.date < firstDate || sample.date > lastDate) this.randomTimes.delete(key);
+        });
 
         this.settings.schedules.forEach(schedule => {
             if (schedule.active){
                 schedule.scheduleItems.forEach(scheduleitem => {
-                    if (scheduleitem.daysType === DaysType.DaysOfWeek)
+                    if (scheduleitem.daysType === DaysType.DaysOfWeek || scheduleitem.daysType === DaysType.DaysOfMonth)
                     {
-                        let now = DateTime.now();
-                        let yesterday = DateTime.now().minus({day:1});
-                        let tomorrow = DateTime.now().plus({day:1});
+                        let yesterday = now.minus({days:1});
+                        let tomorrow = now.plus({days:1});
                         
                         //this.homeyApp.log('Now: ' + now.toString() + " Yesterday: " + yesterday.toString() + " Tomorrow: " + tomorrow.toString());
 
@@ -101,6 +114,11 @@ export class TriggerHandler {
     //resolve the triggering time of a ScheduleItem, taking into account randomness, sun stuff and similar. Based on the date passed in.
     private getTriggerTime(si:ScheduleItem, date:DateTime):DateTime {
         let resTime:DateTime;
+        const nominalDate = date.setZone(this.localTimeZone).toISODate();
+        const randomKey = si.schedule.id + ':' + si.id + ':' + nominalDate;
+        if (si.randomTrigger.used && this.randomTimes.has(randomKey)) {
+            return this.randomTimes.get(randomKey).time;
+        }
         try {
             if (!si.randomTrigger.used) resTime = this.getTimeInfoTime(si.mainTrigger, date);
             else {
@@ -118,17 +136,21 @@ export class TriggerHandler {
             }
             if (si.triggerFirstOf.used) {
                 let firstTime:DateTime = this.getTimeInfoTime(si.triggerFirstOf, date);
-                resTime = DateTime.fromMillis(Math.min(firstTime.toMillis(), resTime.toMillis()));
+                resTime = DateTime.fromMillis(Math.min(firstTime.toMillis(), resTime.toMillis()), {zone:this.localTimeZone});
             } 
             if (si.triggerLastOf.used) {
                 let lastTime:DateTime = this.getTimeInfoTime(si.triggerLastOf, date);
-                resTime = DateTime.fromMillis(Math.max(lastTime.toMillis(), resTime.toMillis()));
+                resTime = DateTime.fromMillis(Math.max(lastTime.toMillis(), resTime.toMillis()), {zone:this.localTimeZone});
             } 
     
                 
         } catch (error) {
-            this.homeyApp.log('Not able to calc trigger time for schedule: ' + si.schedule.name + " si id: " + si.id + ". Config likely corrupt. Skipping.");
+            this.homeyApp.error('Unable to calculate trigger time for schedule: ' + si.schedule.name + ', item: ' + si.id, error);
             return null;
+        }
+        if (si.randomTrigger.used && this.isValidDate(resTime)) {
+            // Reuse the nominal occurrence when its window crosses a midnight refresh.
+            this.randomTimes.set(randomKey, {date:nominalDate, time:resTime});
         }
         return resTime;
 
@@ -148,16 +170,18 @@ export class TriggerHandler {
         let offset=0;
         
         if (ti.timeType == TimeType.TimeOfDay) {
-            timeString = ti.time;
+            timeString = ti.time.split(':').map(part => part.padStart(2, '0')).join(':');
         }
         else if (ti.timeType == TimeType.Solar) {
-            let sei:SunEventInfo = this.sunWrapper.getTime(date.toJSDate(), ti.sunEvent);
+            let sei:SunEventInfo = this.sunWrapper.getTime(dateAtMidnightCallingDate.toJSDate(), ti.sunEvent);
             if (sei === undefined) {
                 this.homeyApp.log('Undefined sunevent returned, returning null. Sunevent passed: ' + ti.sunEvent);
                 return null;
             }
-            timeString = DateTime.fromJSDate(sei.time).toISOTime();
+            const solarTime = DateTime.fromJSDate(sei.time, {zone:this.localTimeZone});
+            if (!solarTime.isValid) return null;
             offset = this.parseOffset(ti.solarOffset);
+            return solarTime.plus(offset);
         }
         return DateTime.fromISO(dateString+"T"+timeString, {zone:this.localTimeZone}).plus(offset);
     }
@@ -210,7 +234,8 @@ export class TriggerHandler {
                 }
             }
             else {
-                this.homeyApp.log('Only trigger if before is not a valid date. Not evaluated. schedule: ' + s.name + ', si: ' + si.id);
+                this.logSkip('invalid-before-condition', s, si, triggerTime, dateAtMidnightCallingDate);
+                return;
             }
         }
 
@@ -230,7 +255,8 @@ export class TriggerHandler {
                 }
             }
             else {
-                this.homeyApp.log('Only trigger if after is not a valid date. Not evaluated. schedule: ' + s.name + ', si: ' + si.id);
+                this.logSkip('invalid-after-condition', s, si, triggerTime, dateAtMidnightCallingDate);
+                return;
             }
         }
 
@@ -284,7 +310,7 @@ export class TriggerHandler {
 
     //return milliseconds offset
     private parseOffset(offsetString:string):number {
-        if (offsetString == '') return null;
+        if (offsetString == '' || offsetString == null) return 0;
         
         let negative = 1;
         if (offsetString.trim()[0] == '-') {
@@ -313,7 +339,8 @@ export class TriggerHandler {
     } 
 
     private dayHitTest(daystype:DaysType, days:number, date:DateTime){
-        let dayofweek = date.setZone(this.localTimeZone).weekday;
+        const localDate = date.setZone(this.localTimeZone);
+        let dayofweek = daystype === DaysType.DaysOfMonth ? localDate.day : localDate.weekday;
         //if (dayofweek===0) dayofweek=7; //sunday returns 0 we want it to be 7
 
         let dayofweekbit = 1 << (dayofweek - 1);
@@ -353,7 +380,20 @@ export class TriggerHandler {
         this.homeyApp.log(msg);
     }
     
-    private timerCallback(arg: 'execute'|'next'|'idle'|'midnight') {
+    private queueTimer(arg: 'execute'|'next'|'idle'|'midnight', delay:number) {
+        if (!this.timerActive) return;
+        const generation = this.timerGeneration;
+        this.runningtimer = this.homeyApp.homey.setTimeout(() => {
+            this.timerCallback(arg, generation);
+        }, Math.max(0, delay));
+    }
+
+    private timerCallback(arg: 'execute'|'next'|'idle'|'midnight', generation = this.timerGeneration) {
+        if (!this.timerActive || generation !== this.timerGeneration) return;
+        if (DateTime.now().setZone(this.localTimeZone).toISODate() !== this.triggerDate) {
+            this.setupTriggers('midnight');
+            arg = 'next';
+        }
 
         let earliesttrigger:Trigger;
         if (this.triggers.length>0) earliesttrigger = this.triggers.sort((a, b) => (a.triggerTime > b.triggerTime) ? 1 : -1)[0];
@@ -361,23 +401,23 @@ export class TriggerHandler {
         if (arg === 'execute') {
             //this.homeyApp.log('Execute!');
             if (earliesttrigger != null) {
+                this.removeTrigger(earliesttrigger);
                 // Set tokens and then trigger flow.
                 let tokenSetPromises = earliesttrigger.scheduleItem.tokenSetters.map(ts => {
                     return this.flowandtokenhandler.setTokenValue(ts.token, ts.value);
                 });
 
-                Promise.all(tokenSetPromises).then(() => {
-                    this.flowandtokenhandler.triggerFlow(earliesttrigger.scheduleItem.tokenSetters.map(ts=>ts.token), earliesttrigger);
-
-                    this.removeTrigger(earliesttrigger);
+                Promise.all(tokenSetPromises).then(async () => {
+                    if (!this.timerActive || generation !== this.timerGeneration) return;
+                    await this.flowandtokenhandler.triggerFlow(earliesttrigger.scheduleItem.tokenSetters.map(ts=>ts.token), earliesttrigger);
                     //this.homeyApp.log('Removed trigger from list: ' + earliesttrigger);
                     
-                    this.runningtimer = setTimeout(function() { this.timerCallback('next'); }.bind(this), 100);
+                    if (this.timerActive && generation === this.timerGeneration) this.queueTimer('next', 100);
                     
                     //this.homeyApp.log('Execution done');
                 }).catch(error => {
-                    this.homeyApp.log('Error while setting token values before trigger: ' + error);
-                    this.runningtimer = setTimeout(function() { this.timerCallback('next'); }.bind(this), 100);
+                    this.homeyApp.error('Schedule execution failed:', error);
+                    if (this.timerActive && generation === this.timerGeneration) this.queueTimer('next', 100);
                 });
                 
             }     
@@ -393,15 +433,15 @@ export class TriggerHandler {
                 if (delta < 100) delta = 100;
                 if (delta > 60000) {
                     delta = 60000;
-                    this.runningtimer = setTimeout(function() { this.timerCallback('next'); }.bind(this), delta);
+                    this.queueTimer('next', delta);
                 }
                 else {
-                    this.runningtimer = setTimeout(function() { this.timerCallback('execute'); }.bind(this), delta);                  
+                    this.queueTimer('execute', delta);
                 }
             }
             else
             {
-                this.runningtimer = setTimeout(function() { this.timerCallback('idle'); }.bind(this), 100);               
+                this.queueTimer('idle', 100);
             }
 
         }
@@ -416,24 +456,24 @@ export class TriggerHandler {
             //let delta = midnight.diffNow('milliseconds', { conversionAccuracy: 'longterm' }).toMillis();
             if (delta > 60000) {
                 delta = 60000;
-                this.runningtimer = setTimeout(function() { this.timerCallback('idle'); }.bind(this), delta);
+                this.queueTimer('idle', delta);
             }
             else{
                 
-                this.runningtimer = setTimeout(function() { this.timerCallback('midnight'); }.bind(this), delta);
+                this.queueTimer('midnight', delta);
             }
         }
         else if (arg === 'midnight') {
             this.homeyApp.log('Midnight, getting new triggers for today!');
             this.homeyApp.log('Time is: ' + DateTime.now().toISOTime());
             this.setupTriggers('midnight');
-            this.runningtimer = setTimeout(function() { this.timerCallback('next'); }.bind(this), 100);
+            this.queueTimer('next', 100);
             
         }
         else {
             //unexpected!
             this.homeyApp.log('Somehow we ended up with a timer callback that has unknown arg: ' + arg);
-            this.runningtimer = setTimeout(function() { this.timerCallback('next'); }.bind(this), 60000);     
+            this.queueTimer('next', 60000);
             }
         }
 
@@ -448,12 +488,19 @@ export class TriggerHandler {
     }
 
     startTimer() {
-        this.runningtimer = setTimeout(function() { this.timerCallback('next'); }.bind(this), 5000);
+        this.stopTimer();
+        this.timerActive = true;
+        this.homeyApp.log('Schedule timer started');
+        this.queueTimer('next', 5000);
     }
 
     stopTimer() {
+        this.timerActive = false;
+        this.timerGeneration++;
         if (this.runningtimer!=null)
-            clearTimeout(this.runningtimer);
+            this.homeyApp.homey.clearTimeout(this.runningtimer);
+        this.runningtimer = null;
+        this.homeyApp.log('Schedule timer cancelled');
     }    
 }
     

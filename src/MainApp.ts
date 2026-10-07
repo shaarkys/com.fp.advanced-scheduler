@@ -20,6 +20,13 @@ export class MainApp {
     private flowAndTokenHandler:FlowAndTokenHandler;
     private triggerHandler:TriggerHandler;
     private sunWrapper:SunWrapper;
+    private reloadQueue:Promise<void> = Promise.resolve();
+    private destroyed = false;
+    private settingsListener = (variable:string) => {
+        if (variable === 'settings' && !this.destroyed) {
+            void this.reinit().catch(error => this.homeyApp.error('Settings reload failed:', error));
+        }
+    };
     
     constructor(homeyApp:HomeyApp) {
         this.homeyApp=homeyApp;
@@ -32,9 +39,14 @@ export class MainApp {
 
         let settingsTxt = this.homey.settings.get('settings');
         let sp = new SettingsPersistance();
-        let version = sp.readSettings(settingsTxt);
+        let version = -1;
+        try {
+            version = sp.readSettings(settingsTxt);
+        } catch (error) {
+            this.homeyApp.error('Stored settings are invalid; scheduling is disabled until settings are repaired:', error);
+        }
         this.homeyApp.log('settings version (-1 means no settings has been stored) ', version);
-        this.asSettings = sp.getSettings();
+        this.asSettings = sp.getSettings() || new ASSettings();
 
         this.saveGeolocation();
 
@@ -58,19 +70,27 @@ export class MainApp {
     }
 
 
-    async reinit() {
+    reinit():Promise<void> {
+        const reload = this.reloadQueue.then(() => {
+            if (!this.destroyed) return this.reloadSettings();
+        });
+        this.reloadQueue = reload.catch(() => {});
+        return reload;
+    }
+
+    private async reloadSettings() {
 
         this.homeyApp.log('Advanced Scheduler MainApp is reinitializing...');
-
-        this.triggerHandler.stopTimer();
 
         let settingsTxt = this.homey.settings.get('settings');
         let sp = new SettingsPersistance();
         sp.readSettings(settingsTxt);
-        this.asSettings = sp.getSettings();
+        this.triggerHandler.stopTimer();
+        this.asSettings = sp.getSettings() || new ASSettings();
         
         this.flowAndTokenHandler.setSchedules(this.asSettings.schedules);
         await this.flowAndTokenHandler.setupTokens();
+        if (this.destroyed) return;
 
         this.triggerHandler = new TriggerHandler(this.homeyApp, this.asSettings, this.flowAndTokenHandler, this.sunWrapper);
         this.triggerHandler.setupTriggers('startup');
@@ -82,22 +102,25 @@ export class MainApp {
     private watchsettings(){
         this.homeyApp.log('Soon watching settings.');
 
-        this.homey.settings.on('set', async (variable) => {
-            if ( variable === 'settings' ) {
-                this.homeyApp.log('SettingsWatcher notised settings change. Reinitializing!');
-                await this.reinit();
-            }
-        });
+        this.homey.settings.on('set', this.settingsListener);
 
         //this.homeyApp.
 
         this.homeyApp.log('Watching settings.');
     }
 
+    async destroy() {
+        this.destroyed = true;
+        this.homey.settings.removeListener('set', this.settingsListener);
+        this.triggerHandler?.stopTimer();
+        await this.reloadQueue;
+    }
+
     private saveGeolocation() {
         let geo = {
             "latitude":this.homey.geolocation.getLatitude(), 
-            "longitude":this.homey.geolocation.getLongitude()
+            "longitude":this.homey.geolocation.getLongitude(),
+            "timezone":this.homey.clock.getTimezone()
         }
         
         this.homey.settings.set('geolocation', JSON.stringify(geo))

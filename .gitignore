@@ -64,3 +64,7 @@ docs/~$SunEvents.pptx
 # Added by Homey CLI
 /.homeybuild/
 test settings.json
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+AGENTS.md
